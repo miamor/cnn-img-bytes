@@ -1,0 +1,17 @@
+config.py
+
+venv
+
+output
+api_tasks
+__archived
+__archived/*
+data
+
+**/feature_maps
+**/data_prepared
+**/logs
+
+__pycache__
+**/__pycache__
+**/**/*.pyc
