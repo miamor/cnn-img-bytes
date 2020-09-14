@@ -24,7 +24,7 @@ from threading import Thread
 from datetime import datetime
 
 
-class Binar2Image:
+class Binary2Image:
     def getBinaryData(self, filepath):
         """
         Extract byte values from binary executable file and store them into list
@@ -64,16 +64,22 @@ class Binar2Image:
 
         return hex_values
 
-    def createGreyScaleImage(self, filepath, width=None, outdir=''):
+    def createGreyScaleImage(self, filepath, width=None, outdir=None):
         """
         Create greyscale image from binary data. Use given with if defined or create square size image from binary data.
         :param filepath: image filepath
         """
         greyscale_data = self.getBinaryData(filepath)
         size = self.get_size(len(greyscale_data), width)
-        self.save_file(filepath, greyscale_data, size, 'L', width, outdir)
+        image = Image.new('RGB', size)
+        image.putdata(greyscale_data)
+        if width > 0:
+            image = image.resize((width, width))
+        if outdir is not None:
+            self.save_file(filepath, image, size, 'L', width, outdir)
+        return np.array(image)
 
-    def createRGBImage(self, filepath, width=None, outdir=''):
+    def createRGBImage(self, filepath, width=None, outdir=None):
         """
         Create RGB image from 24 bit binary data 8bit Red, 8 bit Green, 8bit Blue
         :param filepath: image filepath
@@ -95,13 +101,16 @@ class Binar2Image:
             rgb_data.append((R, G, B))
 
         size = self.get_size(len(rgb_data), width)
-        self.save_file(filepath, rgb_data, size, 'RGB', width, outdir)
+        image = Image.new('RGB', size)
+        image.putdata(rgb_data)
+        if width > 0:
+            image = image.resize((width, width))
+        if outdir is not None:
+            self.save_file(filepath, image, size, 'RGB', width, outdir)
+        return np.array(image)
 
-    def save_file(self, filepath, data, size, image_type, width, outdir='image'):
+    def save_file(self, filepath, image, size, image_type, width, outdir='image'):
         try:
-            image = Image.new(image_type, size)
-            image.putdata(data)
-
             # setup output filepath
             dirname = os.path.dirname(filepath)
             name, _ = os.path.splitext(filepath)
@@ -111,8 +120,6 @@ class Binar2Image:
             os.makedirs(os.path.dirname(imagename), exist_ok=True)
 
             print('[save_file] size', size, (width, width), imagename)
-            if width > 0:
-                image = image.resize((width, width))
 
             image.save(imagename)
             print('[save_file] The file', imagename, 'saved.')
@@ -152,23 +159,26 @@ class Binar2Image:
 
         return (width, height)
 
-    def createSeq(self, filepath, outdir=''):
+    def createSeq(self, filepath, outdir=None):
         hex_seq_data = self.getHexData(filepath)
         # print('[createSeq] hex_seq_data', hex_seq_data)
 
-        dirname = os.path.dirname(filepath)
-        name, _ = os.path.splitext(os.path.basename(filepath))
-        outname = outdir + '/' + name + '.txt'
-
         data = ' '.join(str(byte) for byte in hex_seq_data)
         # print(data)
-        with open(outname, 'w') as f:
-            f.write(data)
-        print('[createSeq] File', outname, 'saved.')
+        if outdir is not None:
+            # dirname = os.path.dirname(filepath)
+            name, _ = os.path.splitext(os.path.basename(filepath))
+            outname = outdir + '/' + name + '.txt'
+            with open(outname, 'w') as f:
+                f.write(data)
+            print('[createSeq] File', outname, 'saved.')
+        return data
 
-    def run(self, file_queue, task_ids, width):
+    def run(self, file_queue, task_ids, width, q):
         task_ids = [str(id) for id in task_ids]
         task_ids_str = '-'.join(task_ids)
+        # rgb_datas = []
+        # seq_datas = []
         while not file_queue.empty():
             filepath = file_queue.get()
             if width is not None:
@@ -183,10 +193,17 @@ class Binar2Image:
                 os.makedirs(outdir_img, exist_ok=True)
 
             # createGreyScaleImage(filepath, width, outdir)
-            self.createRGBImage(filepath, width, outdir_img)
-            self.createSeq(filepath, outdir=outdir_seq)
+            rgb_data = self.createRGBImage(filepath, width, outdir_img)
+            seq_data = self.createSeq(filepath, outdir=outdir_seq)
+            # rgb_data = self.createRGBImage(filepath, width)
+            # seq_data = self.createSeq(filepath)
 
+            # rgb_datas.append(rgb_data)
+            # seq_datas.append(seq_data)
+
+            q.put((rgb_data, seq_data))
             file_queue.task_done()
+        # return rgb_datas, seq_datas
 
     def from_folder(self, input_dir, width=None, thread_number=7):
         # Get all executable files in input directory and add them into queue
@@ -211,12 +228,20 @@ class Binar2Image:
             file_queue.put(file_path)
 
         # Start thread
+        q = Queue()
+        datas = []
+        # thread = Thread(target=self.run, args=(file_queue, task_ids, width, q))
+        # thread.daemon = True
+        # thread.start()
         for index in range(thread_number):
-            thread = Thread(target=self.run, args=(file_queue, task_ids, width))
+            thread = Thread(target=self.run, args=(file_queue, task_ids, width, q))
             thread.daemon = True
             thread.start()
         file_queue.join()
-
+        while not q.empty():
+            datas.append(q.get())
+        
+        return datas
 
 class ImageCoder(object):
     """Helper class that provides TensorFlow image coding utilities."""
@@ -447,10 +472,12 @@ class BuildImgData_RGB:
         #   num_shards: integer number of shards for this data set.
         self._process_image_files(name, filepaths, num_shards, output_directory)
 
-    def from_files(self, filepaths, task_ids, output_directory):
+    def from_files(self, filepaths, task_ids, output_directory=None):
         assert not FLAGS.shards % FLAGS.num_threads, (
             'Please make the FLAGS.num_threads commensurate with '
             'FLAGS.shards')
+        assert output_directory is not None, (
+            'Please define output_directory')
         print('Saving results to %s' % output_directory)
 
         # Run it!
@@ -459,6 +486,36 @@ class BuildImgData_RGB:
         self._process_dataset(name, filepaths, FLAGS.shards, output_directory)
 
         # tf.app.run()
+
+
+class CNN_Img_Module:
+    def __init__(self):
+        self.bin2img = Binary2Image()
+
+        ''' Load model '''
+        self.model = load_model('models/'+model_name+'.h5')
+        # model.summary()
+
+        return
+
+    def prepare_data(self, filepaths, task_ids, output_directory=None):
+        
+        datas = self.bin2img.from_files(filepaths, task_ids=task_ids, width=64)
+        print('datas', len(datas))
+        rgb_datas = datas[0]
+        seq_datas = datas[1]
+        print('rgb_datas', len(rgb_datas))
+        print('\t  rgb', rgb_datas[0].shape)
+        print('seq_datas', len(seq_datas))
+
+
+        ''' Infer '''
+        predict = self.model.predict(rgb_datas)
+        y_preds = predict.argmax(axis=1)
+
+
+        # img_builder = BuildImgData_RGB()
+        # img_builder.from_files(filepaths, task_ids, output_directory)
 
 
 if __name__ == '__main__':
@@ -485,21 +542,28 @@ if __name__ == '__main__':
     #                  '/api_tasks/bin/2e70ea6467d4fef3c8ec276724fd95c6dd06e7ca5d8fdf4d79732bbcec904326',
     #                  cf.__IMG_API_ROOT__+'/api_tasks/bin/2ee99f7590d2eac42d729053f08f3bc2989e8ab3ebe49dc63d58a1dc4ed576d0']
 
-    # bin2img = Binar2Image()
+    # bin2img = Binary2Image()
     # bin2img.from_files(bin_filepaths, task_ids=task_ids, width=0)
 
 
-    filepaths = []
-    dir = cf.__IMG_API_ROOT__+'/api_tasks/__image0/1-1/'
-    for file in os.listdir(dir):
-        filepaths.append(dir+file)
-    task_ids = [1,1]
+    # filepaths = []
+    # dir = cf.__IMG_API_ROOT__+'/api_tasks/__image0/1-1/'
+    # for file in os.listdir(dir):
+    #     filepaths.append(dir+file)
+    # task_ids = [1,1]
 
-    # filepaths = [cf.__IMG_API_ROOT__+'/api_tasks/RGB/0a8ce026714e03e72c619307bd598add5f9b639cfd91437cb8d9c847bf9f6894_RGB.png',
-    #              cf.__IMG_API_ROOT__ +
-    #              '/api_tasks/RGB/0c0a307a3f9882742406f44ddcccfd62448ce10cd7ceca1e377060d9b670b48b_RGB.png',
-    #              cf.__IMG_API_ROOT__ +
-    #              '/api_tasks/RGB/2e70ea6467d4fef3c8ec276724fd95c6dd06e7ca5d8fdf4d79732bbcec904326_RGB.png',
-    #              cf.__IMG_API_ROOT__+'/api_tasks/RGB/2ee99f7590d2eac42d729053f08f3bc2989e8ab3ebe49dc63d58a1dc4ed576d0_RGB.png']
-    img_builder = BuildImgData_RGB()
-    img_builder.from_files(filepaths, task_ids=task_ids, output_directory=cf.__IMG_API_ROOT__+'/api_tasks/__prepared_RGB')
+    # # filepaths = [cf.__IMG_API_ROOT__+'/api_tasks/RGB/0a8ce026714e03e72c619307bd598add5f9b639cfd91437cb8d9c847bf9f6894_RGB.png',
+    # #              cf.__IMG_API_ROOT__ +
+    # #              '/api_tasks/RGB/0c0a307a3f9882742406f44ddcccfd62448ce10cd7ceca1e377060d9b670b48b_RGB.png',
+    # #              cf.__IMG_API_ROOT__ +
+    # #              '/api_tasks/RGB/2e70ea6467d4fef3c8ec276724fd95c6dd06e7ca5d8fdf4d79732bbcec904326_RGB.png',
+    # #              cf.__IMG_API_ROOT__+'/api_tasks/RGB/2ee99f7590d2eac42d729053f08f3bc2989e8ab3ebe49dc63d58a1dc4ed576d0_RGB.png']
+    # img_builder = BuildImgData_RGB()
+    # img_builder.from_files(filepaths, task_ids=task_ids, output_directory=cf.__IMG_API_ROOT__+'/api_tasks/__prepared_RGB')
+
+
+    filepaths = ['/home/mtaav/Desktop/old_uploads/85.0.4183.83_chrome_installer.exe',
+                 '/home/mtaav/Desktop/old_uploads/clrcompression.dll']
+    task_ids = [1,2]
+    module = CNN_Img_Module()
+    module.prepare_data(filepaths, task_ids)

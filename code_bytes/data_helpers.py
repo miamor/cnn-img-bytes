@@ -2,6 +2,7 @@ import numpy as np
 import re
 import itertools
 from collections import Counter
+import json
 
 """
 Original taken from https://github.com/dennybritz/cnn-text-classification-tf
@@ -134,17 +135,34 @@ def build_input_data(sentences, labels, vocabulary):
     return [x, y]
 
 
-def load_data_():
+def build_input_data_from_sentences(sentences, vocabulary):
+    """
+    Maps sentencs to vectors based on a vocabulary.
+    """
+    # x = np.array([[vocabulary[word] for word in sentence] for sentence in sentences])
+    x = []
+    for sentence in sentences:
+        xs = []
+        for word in sentence:
+            if word in vocabulary:
+                xs.append(vocabulary[word])
+            else:
+                xs.append(0)
+        x.append(xs)
+    x = np.array(x)
+    return x
+def load_data_x(sentences, sequence_length, vocabulary_inv_path):
     """
     Loads and preprocessed data for the MR dataset.
     Returns input vectors, labels, vocabulary, and inverse vocabulary.
     """
     # Load and preprocess data
-    sentences, labels, sentences_test, labels_test = load_data_and_labels()
-    sentences_padded, sequence_length = pad_sentences(sentences)
-    vocabulary, vocabulary_inv = build_vocab(sentences_padded)
-    x, y = build_input_data(sentences_padded, labels, vocabulary)
-    return [x, y, vocabulary, vocabulary_inv]
+    vocabulary_inv = json.load(open(vocabulary_inv_path, 'r'))
+    vocabulary = {x: i for i, x in enumerate(vocabulary_inv)}
+
+    sentences_padded, _ = pad_sentences(sentences, sequence_length=sequence_length)
+    x = build_input_data_from_sentences(sentences_padded, vocabulary)
+    return x
 
 
 def load_data(train_pos_txt_path, train_neg_txt_path, test_pos_txt_path, test_neg_txt_path, sequence_length=None):
@@ -154,7 +172,7 @@ def load_data(train_pos_txt_path, train_neg_txt_path, test_pos_txt_path, test_ne
     """
     # Load and preprocess data
     sentences, labels, sentences_test, labels_test = load_data_and_labels(train_pos_txt_path, train_neg_txt_path, test_pos_txt_path, test_neg_txt_path)
-    sentences_padded, sequence_length = pad_sentences(sentences,sequence_length=sequence_length)
+    sentences_padded, sequence_length = pad_sentences(sentences, sequence_length=sequence_length)
     sentences_test_padded, _ = pad_sentences(sentences_test, sequence_length=sequence_length)
 
     vocabulary, vocabulary_inv = build_vocab(sentences_padded)

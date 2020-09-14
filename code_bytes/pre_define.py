@@ -80,18 +80,20 @@ def load_data(data_source):
         x_val = x[train_len:]
         y_val = y[train_len:]
 
-    return x_train, y_train, x_val, y_val, x_test, y_test, vocabulary_inv
+    return x_train, y_train, x_val, y_val, x_test, y_test, vocabulary, vocabulary_inv
 
 
 # Data Preparation
 print("Load data...")
 if not load_processed:
-    x_train, y_train, x_val, y_val, x_test, y_test, vocabulary_inv = load_data(data_source)
+    x_train, y_train, x_val, y_val, x_test, y_test, vocabulary, vocabulary_inv = load_data(data_source)
 
     np.save('data_prepared/x_train.npy', x_train)
     np.save('data_prepared/x_val.npy', x_val)
     np.save('data_prepared/y_train.npy', y_train)
     np.save('data_prepared/y_val.npy', y_val)
+    with open('data_prepared/vocabulary.json', 'w') as f:
+        json.dump(vocabulary, f)
     with open('data_prepared/vocabulary_inv.json', 'w') as f:
         json.dump(vocabulary_inv, f)
     if test_pos_txt_path.split('/')[-1] == 'malware_test.txt':
